@@ -247,6 +247,8 @@ DEFINE_string(
     "Rate limit can be specified through --backup_rate_limit\n"
     "\trestore -- Restore the DB from the latest backup available, rate limit can be specified through --restore_rate_limit\n");
 
+DEFINE_string(dataset, "none", "Path to the dataset file");
+
 DEFINE_int64(num, 1000000, "Number of key/values to place in database");
 
 DEFINE_int64(numdistinct, 1000,
@@ -1771,6 +1773,8 @@ DEFINE_bool(build_info, false,
 
 DEFINE_bool(track_and_verify_wals_in_manifest, false,
             "If true, enable WAL tracking in the MANIFEST");
+
+uint64_t *data;
 
 namespace ROCKSDB_NAMESPACE {
 namespace {
@@ -5347,6 +5351,23 @@ class Benchmark {
           rand_num = key_gens[id]->Next();
         }
         GenerateKeyFromInt(rand_num, FLAGS_num, &key);
+        if (FLAGS_dataset.compare("none")!=0) {
+          const char* key_ptr = key.data();
+          uint64_t key_int = 0;
+          key_int = (static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[7])) |
+          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[6])) << 8 |
+          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[5])) << 16 |
+          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[4])) << 24 |
+          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[3])) << 32 |
+          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[2])) << 40 |
+          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[1])) << 48 |
+          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[0])) << 56);
+          char key_buf[sizeof(uint64_t)];
+          for (int i = 0; i < 8; i++) {
+            key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
+          }
+          key = Slice(key_buf, sizeof(uint64_t));
+        }  
         Slice val;
         if (kNumDispAndPersEntries > 0) {
           random_value = rnd_disposable_entry.RandomString(
@@ -6071,6 +6092,23 @@ class Benchmark {
         key_rand = GetRandomKey(&thread->rand);
       }
       GenerateKeyFromInt(key_rand, FLAGS_num, &key);
+      if (FLAGS_dataset.compare("none")!=0) {
+        const char* key_ptr = key.data();
+        uint64_t key_int = 0;
+        key_int = (static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[7])) |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[6])) << 8 |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[5])) << 16 |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[4])) << 24 |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[3])) << 32 |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[2])) << 40 |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[1])) << 48 |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[0])) << 56);
+        char key_buf[sizeof(uint64_t)];
+        for (int i = 0; i < 8; i++) {
+          key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
+        }
+        key = Slice(key_buf, sizeof(uint64_t));
+      }  
       read++;
       std::string ts_ret;
       std::string* ts_ptr = nullptr;
@@ -7335,6 +7373,23 @@ class Benchmark {
     while (!duration.Done(1)) {
       DB* db = SelectDB(thread);
       GenerateKeyFromInt(thread->rand.Next() % FLAGS_num, FLAGS_num, &key);
+      if (FLAGS_dataset.compare("none")!=0) {
+        const char* key_ptr = key.data();
+        uint64_t key_int = 0;
+        key_int = (static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[7])) |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[6])) << 8 |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[5])) << 16 |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[4])) << 24 |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[3])) << 32 |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[2])) << 40 |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[1])) << 48 |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[0])) << 56);
+        char key_buf[sizeof(uint64_t)];
+        for (int i = 0; i < 8; i++) {
+          key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
+        }
+        key = Slice(key_buf, sizeof(uint64_t));
+      }  
       if (get_weight == 0 && put_weight == 0) {
         // one batch completed, reinitialize for next batch
         get_weight = FLAGS_readwritepercent;
@@ -8541,7 +8596,33 @@ class Benchmark {
 
 };
 
+static uint64_t *load_keys() {
+  if (FLAGS_dataset.compare("none")!=0) {
+    std::ifstream is(FLAGS_dataset.c_str(), std::ios::binary | std::ios::in);
+    if (!is.is_open()) {
+      std::cout << FLAGS_dataset << " does not exists" << std::endl;
+      exit(0);
+    }
+    std::cout << "LOADING " << FLAGS_dataset <<" ";
+    uint64_t total_keys;
+    is.read(reinterpret_cast<char*>(&total_keys), sizeof(uint64_t));
+    data = new uint64_t[total_keys];
+    is.read(reinterpret_cast<char*>(data), total_keys*sizeof(uint64_t));
+    is.close();
+    std::cout << "(total keys: " << total_keys << "), done." << std::endl;
+    // std::shuffle(data, data + total_keys, g);
+
+    std::cout << "4 Sample keys: ";
+    for (int i = 0; i < 4; i++)
+      std::cout << data[i] << " ";
+    std::cout << "..." << std::endl;
+  }
+  return data;
+}
+
 int db_bench_tool(int argc, char** argv) {
+  google::ParseCommandLineFlags(&argc, &argv, true);
+  load_keys();
   ROCKSDB_NAMESPACE::port::InstallStackTraceHandler();
   ConfigOptions config_options;
   static bool initialized = false;
@@ -8638,10 +8719,11 @@ int db_bench_tool(int argc, char** argv) {
   }
 
   if (!FLAGS_seed) {
-    uint64_t now = FLAGS_env->GetSystemClock()->NowMicros();
-    seed_base = static_cast<int64_t>(now);
-    fprintf(stdout, "Set seed to %" PRIu64 " because --seed was 0\n",
-            *seed_base);
+    // uint64_t now = FLAGS_env->GetSystemClock()->NowMicros();
+    // seed_base = static_cast<int64_t>(now);
+    // fprintf(stdout, "Set seed to %" PRIu64 " because --seed was 0\n",
+    //         *seed_base);
+    FLAGS_seed = static_cast<int64_t>(1234);
   } else {
     seed_base = FLAGS_seed;
   }
