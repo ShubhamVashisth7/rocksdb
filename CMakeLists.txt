@@ -1530,7 +1530,9 @@ if(WITH_BENCHMARK_TOOLS)
   add_executable(db_bench${ARTIFACT_SUFFIX}
     tools/simulated_hybrid_file_system.cc
     tools/db_bench.cc
-    tools/db_bench_tool.cc)
+    tools/db_bench_tool.cc
+    util/zipf.cc
+    util/latest-generator.cc)
   target_link_libraries(db_bench${ARTIFACT_SUFFIX}
     ${ROCKSDB_LIB} ${THIRDPARTY_LIBS})
 

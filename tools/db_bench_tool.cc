@@ -91,6 +91,8 @@
 #include "utilities/merge_operators/bytesxor.h"
 #include "utilities/merge_operators/sortlist.h"
 #include "utilities/persistent_cache/block_cache_tier.h"
+#include "util/latest-generator.h"
+#include "util/zipf.h"
 
 #ifdef MEMKIND
 #include "memory/memkind_kmem_allocator.h"
@@ -156,7 +158,13 @@ DEFINE_string(
     "getmergeoperands,",
     "readrandomoperands,"
     "backup,"
-    "restore"
+    "restore,"
+    "ycsbwklda,"
+    "ycsbwkldb,"
+    "ycsbwkldc,"
+    "ycsbwkldd,"
+    "ycsbwklde,"
+    "ycsbwkldf,"
 
     "Comma-separated list of operations to run in the specified"
     " order. Available benchmarks:\n"
@@ -1143,6 +1151,7 @@ DEFINE_bool(report_bg_io_stats, false,
 DEFINE_bool(use_stderr_info_logger, false,
             "Write info logs to stderr instead of to LOG file. ");
 
+DEFINE_bool(YCSB_uniform_distribution, false, "Uniform key distribution for YCSB");            
 
 DEFINE_string(trace_file, "", "Trace workload to a file. ");
 
@@ -3683,6 +3692,18 @@ class Benchmark {
         }
         fresh_db = true;
         method = &Benchmark::TimeSeries;
+      }  else if (name == "ycsbwklda") {
+        method = &Benchmark::YCSBWorkloadA;
+      } else if (name == "ycsbwkldb") {
+        method = &Benchmark::YCSBWorkloadB;
+      } else if (name == "ycsbwkldc") {
+        method = &Benchmark::YCSBWorkloadC;
+      } else if (name == "ycsbwkldd") {
+        method = &Benchmark::YCSBWorkloadD;
+      } else if (name == "ycsbwklde") {
+        method = &Benchmark::YCSBWorkloadE;
+      } else if (name == "ycsbwkldf") {
+        method = &Benchmark::YCSBWorkloadF;
       } else if (name == "block_cache_entry_stats") {
         // DB::Properties::kBlockCacheEntryStats
         PrintStats("rocksdb.block-cache-entry-stats");
@@ -5532,6 +5553,543 @@ class Benchmark {
     }
     thread->stats.AddBytes(bytes);
   }
+
+  // Workload A: Update heavy workload
+  // This workload has a mix of 50/50 reads and writes. 
+  // An application example is a session store recording recent actions.
+  // Read/update ratio: 50/50
+  // Default data size: 1 KB records 
+  // Request distribution: zipfian
+  void YCSBWorkloadA(ThreadState* thread) {
+  ReadOptions options(FLAGS_verify_checksum, true);
+  RandomGenerator gen;
+  init_latestgen(FLAGS_num);
+  init_zipf_generator(0, FLAGS_num);
+  
+  std::string value;
+  int64_t found = 0;
+  int64_t reads_done = 0;
+  int64_t writes_done = 0;
+  Duration duration(FLAGS_duration, readwrites_);
+
+  std::unique_ptr<const char[]> key_guard;
+  Slice key = AllocateKey(&key_guard);
+
+  if (FLAGS_benchmark_write_rate_limit > 0) {
+    thread->shared->write_rate_limiter.reset(
+        NewGenericRateLimiter(FLAGS_benchmark_write_rate_limit));
+  }
+
+  int get_weight = 50;
+  int put_weight = 50;
+
+  while (!duration.Done(1)) {
+    DB* db = SelectDB(thread);
+
+    long k = FLAGS_YCSB_uniform_distribution
+                 ? (thread->rand.Next() % FLAGS_num)
+                 : (nextValue() % FLAGS_num);
+    GenerateKeyFromInt(k, FLAGS_num, &key);
+    if (FLAGS_dataset.compare("none") != 0) {
+      const char* key_ptr = key.data();
+      uint64_t key_int = 0;
+      key_int = (static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[7])) |
+                 static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[6])) << 8 |
+                 static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[5])) << 16 |
+                 static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[4])) << 24 |
+                 static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[3])) << 32 |
+                 static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[2])) << 40 |
+                 static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[1])) << 48 |
+                 static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[0])) << 56);
+      char key_buf[sizeof(uint64_t)];
+      for (int i = 0; i < 8; i++) {
+        key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
+      }
+      key = Slice(key_buf, sizeof(uint64_t));
+    }
+
+    if (get_weight == 0 && put_weight == 0) {
+      get_weight = 50;
+      put_weight = 50;
+    }
+
+    if (get_weight > 0) {
+      Status s = db->Get(options, key, &value);
+      if (!s.ok() && !s.IsNotFound()) {
+        // handle error if needed
+      } else if (!s.IsNotFound()) {
+        found++;
+      }
+      get_weight--;
+      reads_done++;
+      thread->stats.FinishedOps(nullptr, db, 1, kRead);
+    } else if (put_weight > 0) {
+      if (FLAGS_benchmark_write_rate_limit > 0) {
+        thread->shared->write_rate_limiter->Request(
+            value_size + key_size_, Env::IO_HIGH,
+            nullptr, RateLimiter::OpType::kWrite);
+        thread->stats.ResetLastOpTime();
+      }
+      Status s = db->Put(write_options_, key, gen.Generate(value_size));
+      if (s.ok()) {
+        writes_done++;
+        thread->stats.FinishedOps(nullptr, db, 1, kWrite);
+      }
+      put_weight--;
+    }
+  }
+
+  char msg[100];
+  std::cout << std::endl;
+  snprintf(msg, sizeof(msg),
+           "( reads:%" PRIu64 " writes:%" PRIu64 " total:%" PRIu64 " found:%" PRIu64 ")",
+           reads_done, writes_done, readwrites_, found);
+  thread->stats.AddMessage(msg);
+}
+
+
+  // Workload B: Read mostly workload
+  // This workload has a 95/5 reads/write mix. 
+  // Application example: photo tagging; add a tag is an update, 
+  // but most operations are to read tags.
+
+  // Read/update ratio: 95/5
+  // Default data size: 1 KB records 
+  // Request distribution: zipfian
+  void YCSBWorkloadB(ThreadState* thread) {
+  ReadOptions options(FLAGS_verify_checksum, true);
+  RandomGenerator gen;
+  init_latestgen(FLAGS_num);
+  init_zipf_generator(0, FLAGS_num);
+
+  std::string value;
+  int64_t found = 0;
+  int64_t reads_done = 0;
+  int64_t writes_done = 0;
+  Duration duration(FLAGS_duration, readwrites_);
+
+  std::unique_ptr<const char[]> key_guard;
+  Slice key = AllocateKey(&key_guard);
+
+  int get_weight = 95;
+  int put_weight = 5;
+
+  while (!duration.Done(1)) {
+    DB* db = SelectDB(thread);
+
+    long k = FLAGS_YCSB_uniform_distribution
+                ? (thread->rand.Next() % FLAGS_num)
+                : (nextValue() % FLAGS_num);
+    GenerateKeyFromInt(k, FLAGS_num, &key);
+
+    if (FLAGS_dataset.compare("none") != 0) {
+      const char* key_ptr = key.data();
+      uint64_t key_int = (static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[7])) |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[6])) << 8 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[5])) << 16 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[4])) << 24 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[3])) << 32 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[2])) << 40 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[1])) << 48 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[0])) << 56);
+      char key_buf[sizeof(uint64_t)];
+      for (int i = 0; i < 8; i++) {
+        key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
+      }
+      key = Slice(key_buf, sizeof(uint64_t));
+    }
+
+    if (get_weight == 0 && put_weight == 0) {
+      get_weight = 95;
+      put_weight = 5;
+    }
+
+    if (get_weight > 0) {
+      Status s = db->Get(options, key, &value);
+      if (!s.ok() && !s.IsNotFound()) {
+        // optionally log error
+      } else if (!s.IsNotFound()) {
+        found++;
+      }
+      get_weight--;
+      reads_done++;
+      thread->stats.FinishedOps(nullptr, db, 1, kRead);
+    } else if (put_weight > 0) {
+      // Optionally: read before write to simulate read-modify-write
+      db->Get(options, key, &value); // safe to ignore result
+      Status s = db->Put(write_options_, key, gen.Generate(value_size));
+      if (s.ok()) {
+        writes_done++;
+        thread->stats.FinishedOps(nullptr, db, 1, kWrite);
+      }
+      put_weight--;
+    }
+  }
+
+  char msg[100];
+  std::cout << std::endl;
+  snprintf(msg, sizeof(msg),
+           "( reads:%" PRIu64 " writes:%" PRIu64 " total:%" PRIu64 " found:%" PRIu64 ")",
+           reads_done, writes_done, readwrites_, found);
+  thread->stats.AddMessage(msg);
+}
+
+  // Workload C: Read only
+  // This workload is 100% read. Application example: user profile cache, 
+  // where profiles are constructed elsewhere (e.g., Hadoop).
+  // Read/update ratio: 100/0
+  // Default data size: 1 KB records 
+  // Request distribution: zipfian
+  void YCSBWorkloadC(ThreadState* thread) {
+    ReadOptions options(FLAGS_verify_checksum, true);
+    RandomGenerator gen;
+    init_latestgen(FLAGS_num);
+    init_zipf_generator(0, FLAGS_num);
+
+    std::string value;
+    int64_t found = 0;
+
+    int64_t reads_done = 0;
+    int64_t writes_done = 0;
+    // Duration duration(FLAGS_duration, 0);
+
+    std::unique_ptr<const char[]> key_guard;
+    Slice key = AllocateKey(&key_guard);
+
+
+    Duration duration(FLAGS_duration, reads_);
+    // the number of iterations is the larger of read_ or write_
+    while (!duration.Done(1)) {
+      DB* db = SelectDB(thread);
+
+      long k;
+      if (FLAGS_YCSB_uniform_distribution){
+        //Generate number from uniform distribution            
+        k = thread->rand.Next() % FLAGS_num;
+      } else { //default
+        //Generate number from zipf distribution
+        k = nextValue() % FLAGS_num;           
+      }
+      GenerateKeyFromInt(k, FLAGS_num, &key);
+      if (FLAGS_dataset.compare("none")!=0) {
+        const char* key_ptr = key.data();
+        uint64_t key_int = 0;
+        key_int = (static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[7])) |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[6])) << 8 |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[5])) << 16 |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[4])) << 24 |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[3])) << 32 |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[2])) << 40 |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[1])) << 48 |
+        static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[0])) << 56);
+        char key_buf[sizeof(uint64_t)];
+        for (int i = 0; i < 8; i++) {
+          key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
+        }
+        key = Slice(key_buf, sizeof(uint64_t));
+      }  
+
+      //read
+      Status s = db->Get(options, key, &value);
+      if (!s.ok() && !s.IsNotFound()) {
+        fprintf(stderr, "get error: %s\n", s.ToString().c_str());
+        // we continue after error rather than exiting so that we can
+        // find more errors if any
+      } else if (!s.IsNotFound()) {
+        found++;
+        thread->stats.FinishedOps(nullptr, db, 1, kRead);
+      }
+      reads_done++;
+
+    } 
+    char msg[100];
+    std::cout << std::endl;
+    snprintf(msg, sizeof(msg), "( reads:%" PRIu64 " writes:%" PRIu64 \
+             " total:%" PRIu64 " found:%" PRIu64 ")",
+             reads_done, writes_done, readwrites_, found);
+    thread->stats.AddMessage(msg);
+  }
+
+
+  // Workload D: Read latest workload
+  // In this workload, new records are inserted, and the most recently 
+  // inserted records are the most popular. Application example: 
+  // user status updates; people want to read the latest.
+  
+  // Read/update/insert ratio: 95/0/5
+  // Default data size: 1 KB records 
+  // Request distribution: latest
+
+  // The insert order for this is hashed, not ordered. The "latest" items may be 
+  // scattered around the keyspace if they are keyed by userid.timestamp. A workload
+  // which orders items purely by time, and demands the latest, is very different than 
+  // workload here (which we believe is more typical of how people build systems.)
+  void YCSBWorkloadD(ThreadState* thread) {
+  ReadOptions options(FLAGS_verify_checksum, true);
+  RandomGenerator gen;
+  init_latestgen(FLAGS_num);
+  init_zipf_generator(0, FLAGS_num);
+
+  std::string value;
+  int64_t found = 0;
+  int64_t reads_done = 0;
+  int64_t writes_done = 0;
+  Duration duration(FLAGS_duration, readwrites_);
+
+  std::unique_ptr<const char[]> key_guard;
+  Slice key = AllocateKey(&key_guard);
+
+  int get_weight = 95;
+  int put_weight = 5;
+
+  while (!duration.Done(1)) {
+    DB* db = SelectDB(thread);
+
+    long k = FLAGS_YCSB_uniform_distribution
+                 ? (thread->rand.Next() % FLAGS_num)
+                 : (next_value_latestgen() % FLAGS_num);
+    GenerateKeyFromInt(k, FLAGS_num, &key);
+
+    if (FLAGS_dataset.compare("none") != 0) {
+      const char* key_ptr = key.data();
+      uint64_t key_int = (static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[7])) |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[6])) << 8 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[5])) << 16 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[4])) << 24 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[3])) << 32 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[2])) << 40 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[1])) << 48 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[0])) << 56);
+      char key_buf[sizeof(uint64_t)];
+      for (int i = 0; i < 8; i++) {
+        key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
+      }
+      key = Slice(key_buf, sizeof(uint64_t));
+    }
+
+    if (get_weight == 0 && put_weight == 0) {
+      get_weight = 95;
+      put_weight = 5;
+    }
+
+    if (get_weight > 0) {
+      Status s = db->Get(options, key, &value);
+      if (!s.ok() && !s.IsNotFound()) {
+        // optionally log error
+      } else if (!s.IsNotFound()) {
+        found++;
+      }
+      get_weight--;
+      reads_done++;
+      thread->stats.FinishedOps(nullptr, db, 1, kRead);
+    } else if (put_weight > 0) {
+      Status s = db->Put(write_options_, key, gen.Generate(value_size));
+      if (s.ok()) {
+        writes_done++;
+        thread->stats.FinishedOps(nullptr, db, 1, kWrite);
+      }
+      put_weight--;
+    }
+  }
+
+  char msg[100];
+  std::cout << std::endl;
+  snprintf(msg, sizeof(msg),
+           "( reads:%" PRIu64 " writes:%" PRIu64 " total:%" PRIu64 " found:%" PRIu64 ")",
+           reads_done, writes_done, readwrites_, found);
+  thread->stats.AddMessage(msg);
+}
+
+
+  // Workload E: Short ranges. 
+  // In this workload, short ranges of records are queried,
+  // instead of individual records. Application example: 
+  // threaded conversations, where each scan is for the posts 
+  // in a given thread (assumed to be clustered by thread id).
+  
+  // Scan/insert ratio: 95/5
+  // Default data size: 1 KB records 
+  // Request distribution: latest
+  // Scan Length Distribution=uniform
+  // Max scan length = 100
+
+  // The insert order is hashed, not ordered. Although the scans are ordered, it does not necessarily
+  // follow that the data is inserted in order. For example, posts for thread 
+  // 342 may not be inserted contiguously, but
+  // instead interspersed with posts from lots of other threads. The way the YCSB 
+  // client works is that it will pick a start
+  // key, and then request a number of records; this works fine even for hashed insertion.
+void YCSBWorkloadE(ThreadState* thread) {
+  ReadOptions options(FLAGS_verify_checksum, true);
+  RandomGenerator gen;
+  init_latestgen(FLAGS_num);
+  init_zipf_generator(0, FLAGS_num);
+
+  std::string value;
+  int64_t found = 0;
+  int64_t reads_done = 0;
+  int64_t writes_done = 0;
+  Duration duration(FLAGS_duration, readwrites_);
+
+  std::unique_ptr<const char[]> key_guard;
+  Slice key = AllocateKey(&key_guard);
+
+  int scan_weight = 95;
+  int insert_weight = 5;
+
+  while (!duration.Done(1)) {
+    DB* db = SelectDB(thread);
+
+    long k = FLAGS_YCSB_uniform_distribution
+                 ? (thread->rand.Next() % FLAGS_num)
+                 : (next_value_latestgen() % FLAGS_num);
+    GenerateKeyFromInt(k, FLAGS_num, &key);
+    if (FLAGS_dataset.compare("none") != 0) {
+      const char* key_ptr = key.data();
+      uint64_t key_int = (static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[7])) |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[6])) << 8 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[5])) << 16 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[4])) << 24 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[3])) << 32 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[2])) << 40 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[1])) << 48 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[0])) << 56);
+      char key_buf[sizeof(uint64_t)];
+      for (int i = 0; i < 8; i++) {
+        key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
+      }
+      key = Slice(key_buf, sizeof(uint64_t));
+    }
+
+    if (scan_weight == 0 && insert_weight == 0) {
+      scan_weight = 95;
+      insert_weight = 5;
+    }
+
+    if (scan_weight > 0) {
+      // SCAN 
+      int scan_length =  (thread->rand.Next() % 100) + 1; // 1 to 100
+      Iterator* iter = db->NewIterator(options);
+      int64_t i = 0;
+      int64_t bytes = 0;
+      for (iter->Seek(key); i < scan_length && iter->Valid(); iter->Next()) {
+        bytes += iter->key().size() + iter->value().size();
+        ++i;
+      }
+      delete iter;
+
+      reads_done++;
+      scan_weight--;
+      thread->stats.FinishedOps(nullptr, db, 1, kRead);
+
+    } else if (insert_weight > 0) {
+      // INSERT 
+      Status s = db->Put(write_options_, key, gen.Generate(value_size));
+      if (s.ok()) {
+        writes_done++;
+        insert_weight--;
+        thread->stats.FinishedOps(nullptr, db, 1, kWrite);
+      }
+    }
+  }
+
+  char msg[100];
+  std::cout << std::endl;
+  snprintf(msg, sizeof(msg),
+           "( reads:%" PRIu64 " writes:%" PRIu64 " total:%" PRIu64 " found:%" PRIu64 ")",
+           reads_done, writes_done, readwrites_, found);
+  thread->stats.AddMessage(msg);
+}
+  
+  // Workload F: Read-modify-write workload
+  // In this workload, the client will read a record, 
+  // modify it, and write back the changes. Application 
+  // example: user database, where user records are read 
+  // and modified by the user or to record user activity.
+
+  // Read/read-modify-write ratio: 50/50
+  // Default data size: 1 KB records 
+  // Request distribution: zipfian
+
+ void YCSBWorkloadF(ThreadState* thread) {
+  ReadOptions options(FLAGS_verify_checksum, true);
+  RandomGenerator gen;
+  init_latestgen(FLAGS_num);
+  init_zipf_generator(0, FLAGS_num);
+
+  std::string value;
+  int64_t found = 0;
+  int64_t reads_done = 0;
+  int64_t writes_done = 0;
+  Duration duration(FLAGS_duration, readwrites_);
+
+  std::unique_ptr<const char[]> key_guard;
+  Slice key = AllocateKey(&key_guard);
+
+  int read_weight = 50;
+  int rmw_weight = 50;
+
+  while (!duration.Done(1)) {
+    DB* db = SelectDB(thread);
+
+    long k = FLAGS_YCSB_uniform_distribution
+                 ? (thread->rand.Next() % FLAGS_num)
+                 : (nextValue() % FLAGS_num);
+    GenerateKeyFromInt(k, FLAGS_num, &key);
+
+    if (FLAGS_dataset.compare("none") != 0) {
+      const char* key_ptr = key.data();
+      uint64_t key_int = (static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[7])) |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[6])) << 8 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[5])) << 16 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[4])) << 24 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[3])) << 32 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[2])) << 40 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[1])) << 48 |
+                          static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[0])) << 56);
+      char key_buf[sizeof(uint64_t)];
+      for (int i = 0; i < 8; i++) {
+        key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
+      }
+      key = Slice(key_buf, sizeof(uint64_t));
+    }
+
+    if (read_weight == 0 && rmw_weight == 0) {
+      read_weight = 50;
+      rmw_weight = 50;
+    }
+
+    if (read_weight > 0) {
+      // Regular read
+      Status s = db->Get(options, key, &value);
+      if (!s.ok() && !s.IsNotFound()) {
+        // optionally handle error
+      } else if (!s.IsNotFound()) {
+        found++;
+      }
+      read_weight--;
+      reads_done++;
+      thread->stats.FinishedOps(nullptr, db, 1, kRead);
+
+    } else if (rmw_weight > 0) {
+      // Read-Modify-Write
+      Status s = db->Get(options, key, &value);  // simulate read before write
+      s = db->Put(write_options_, key, gen.Generate(value_size));
+      if (s.ok()) {
+        writes_done++;
+        rmw_weight--;
+        thread->stats.FinishedOps(nullptr, db, 1, kWrite);
+      }
+    }
+  }
+
+  char msg[100];
+  std::cout << std::endl;
+  snprintf(msg, sizeof(msg),
+           "( reads:%" PRIu64 " writes:%" PRIu64 " total:%" PRIu64 " found:%" PRIu64 ")",
+           reads_done, writes_done, readwrites_, found);
+  thread->stats.AddMessage(msg);
+}
 
   Status DoDeterministicCompact(ThreadState* thread,
                                 CompactionStyle compaction_style,
