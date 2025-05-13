@@ -5715,8 +5715,6 @@ class Benchmark {
       reads_done++;
       thread->stats.FinishedOps(nullptr, db, 1, kRead);
     } else if (put_weight > 0) {
-      // Optionally: read before write to simulate read-modify-write
-      db->Get(options, key, &value); // safe to ignore result
       Status s = db->Put(write_options_, key, gen.Generate(value_size));
       if (s.ok()) {
         writes_done++;
