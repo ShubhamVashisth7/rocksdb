@@ -2457,6 +2457,11 @@ class Stats {
       counted_fs->ResetCounters();
     }
     fflush(stdout);
+    std::ofstream ofile;
+    std::string output_path = "out/db_bench.csv";
+    ofile.open(output_path, std::ios_base::app);
+    ofile << "RocksDB" << "," << FLAGS_dataset << "," << name.ToString().c_str() << "," << FLAGS_memtablerep << "," << FLAGS_num*FLAGS_threads << "," << FLAGS_threads << "," << (long)throughput << std::endl;
+    ofile.close();
   }
 };
 
