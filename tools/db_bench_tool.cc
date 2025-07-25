@@ -421,7 +421,9 @@ DEFINE_double(read_random_exp_range, 0.0,
               "The larger the number is, the more skewed the reads are. "
               "Only used in readrandom and multireadrandom benchmarks.");
 
-DEFINE_bool(histogram, false, "Print histogram of operation timings");
+DEFINE_bool(histogram, true, "Print histogram of operation timings");
+
+DEFINE_bool(plot_histogram, false, "Print histogram of operation timings");
 
 DEFINE_bool(confidence_interval_only, false,
             "Print 95% confidence interval upper and lower bounds only for "
@@ -2439,13 +2441,14 @@ class Stats {
     }
     AppendWithSpace(&extra, message_);
     double throughput = (double)done_ / elapsed;
+    double avg_latency = seconds_ / done_;
 
     fprintf(stdout,
             "%-12s : %11.3f micros/op %ld ops/sec %.3f seconds %" PRIu64
             " operations;%s%s\n",
             name.ToString().c_str(), seconds_ * 1e6 / done_, (long)throughput,
             elapsed, done_, (extra.empty() ? "" : " "), extra.c_str());
-    if (FLAGS_histogram) {
+    if (FLAGS_plot_histogram) {
       for (auto it = hist_.begin(); it != hist_.end(); ++it) {
         fprintf(stdout, "Microseconds per %s:\n%s\n",
                 OperationTypeString[it->first].c_str(),
@@ -2463,7 +2466,19 @@ class Stats {
     std::ofstream ofile;
     std::string output_path = "out/db_bench.csv";
     ofile.open(output_path, std::ios_base::app);
-    ofile << "RocksDB" << "," << FLAGS_dataset << "," << name.ToString().c_str() << "," << FLAGS_memtablerep << "," << FLAGS_num*FLAGS_threads << "," << FLAGS_threads << "," << (long)throughput << std::endl;
+
+    double p90_latency, p99_latency;
+    if (hist_.count(kRead)) {
+      p90_latency = hist_[kRead]->Percentile(90.0);
+      p99_latency = hist_[kRead]->Percentile(99.0);
+    } else if (hist_.count(kWrite)) {
+      p90_latency = hist_[kWrite]->Percentile(90.0);
+      p99_latency = hist_[kWrite]->Percentile(99.0);
+    } else if (!hist_.empty()) {
+      p90_latency = hist_.begin()->second->Percentile(90.0);
+      p99_latency = hist_.begin()->second->Percentile(99.0);
+    } 
+    ofile << "RocksDB" << "," << FLAGS_dataset << "," << name.ToString().c_str() << "," << FLAGS_memtablerep << "," << FLAGS_num*FLAGS_threads << "," << FLAGS_threads << "," << elapsed << "," << (long)throughput << "," << avg_latency << "," << p90_latency << "," << p99_latency << std::endl;
     ofile.close();
   }
 };
