@@ -257,8 +257,6 @@ DEFINE_string(
 
 DEFINE_string(dataset, "none", "Path to the dataset file");
 
-DEFINE_string(dataset_type, "ints", "could be ints or floats");
-
 DEFINE_int64(num, 1000000, "Number of key/values to place in database");
 
 DEFINE_int64(numdistinct, 1000,
@@ -1788,7 +1786,6 @@ DEFINE_bool(track_and_verify_wals_in_manifest, false,
             "If true, enable WAL tracking in the MANIFEST");
 
 uint64_t *data = nullptr;
-double *data_doubles = nullptr; 
 
 namespace ROCKSDB_NAMESPACE {
 namespace {
@@ -5406,19 +5403,11 @@ class Benchmark {
           static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[2])) << 40 |
           static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[1])) << 48 |
           static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[0])) << 56);
-          if (FLAGS_dataset_type.compare("floats") == 0) {
-            char key_buf[sizeof(double)];
-            double val = data_doubles[key_int];
-            std::memcpy(key_buf, &val, sizeof(double));
-            key = Slice(key_buf, sizeof(double));
+          char key_buf[sizeof(uint64_t)];
+          for (int i = 0; i < 8; i++) {
+            key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
           }
-          else {
-            char key_buf[sizeof(uint64_t)];
-            for (int i = 0; i < 8; i++) {
-              key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
-            }
-            key = Slice(key_buf, sizeof(uint64_t));
-          }
+          key = Slice(key_buf, sizeof(uint64_t));
         }  
         Slice val;
         if (kNumDispAndPersEntries > 0) {
@@ -5632,19 +5621,11 @@ class Benchmark {
                  static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[2])) << 40 |
                  static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[1])) << 48 |
                  static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[0])) << 56);
-      if (FLAGS_dataset_type.compare("floats") == 0) {
-            char key_buf[sizeof(double)];
-            double val = data_doubles[key_int];
-            std::memcpy(key_buf, &val, sizeof(double));
-            key = Slice(key_buf, sizeof(double));
-          }
-      else {
-        char key_buf[sizeof(uint64_t)];
-        for (int i = 0; i < 8; i++) {
-          key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
-        }
-        key = Slice(key_buf, sizeof(uint64_t));
+      char key_buf[sizeof(uint64_t)];
+      for (int i = 0; i < 8; i++) {
+        key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
       }
+      key = Slice(key_buf, sizeof(uint64_t));
     }
 
     if (get_weight == 0 && put_weight == 0) {
@@ -5731,19 +5712,11 @@ class Benchmark {
                           static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[2])) << 40 |
                           static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[1])) << 48 |
                           static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[0])) << 56);
-      if (FLAGS_dataset_type.compare("floats") == 0) {
-        char key_buf[sizeof(double)];
-        double val = data_doubles[key_int];
-        std::memcpy(key_buf, &val, sizeof(double));
-        key = Slice(key_buf, sizeof(double));
-      }
-      else {
         char key_buf[sizeof(uint64_t)];
         for (int i = 0; i < 8; i++) {
           key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
         }
         key = Slice(key_buf, sizeof(uint64_t));
-      }
     }
 
     if (get_weight == 0 && put_weight == 0) {
@@ -5827,19 +5800,11 @@ class Benchmark {
         static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[2])) << 40 |
         static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[1])) << 48 |
         static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[0])) << 56);
-        if (FLAGS_dataset_type.compare("floats") == 0) {
-          char key_buf[sizeof(double)];
-          double val = data_doubles[key_int];
-          std::memcpy(key_buf, &val, sizeof(double));
-          key = Slice(key_buf, sizeof(double));
+        char key_buf[sizeof(uint64_t)];
+        for (int i = 0; i < 8; i++) {
+          key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
         }
-        else {
-          char key_buf[sizeof(uint64_t)];
-          for (int i = 0; i < 8; i++) {
-            key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
-          }
-          key = Slice(key_buf, sizeof(uint64_t));
-        }
+        key = Slice(key_buf, sizeof(uint64_t));
       }  
 
       //read
@@ -5913,19 +5878,11 @@ class Benchmark {
                           static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[2])) << 40 |
                           static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[1])) << 48 |
                           static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[0])) << 56);
-      if (FLAGS_dataset_type.compare("floats") == 0) {
-        char key_buf[sizeof(double)];
-        double val = data_doubles[key_int];
-        std::memcpy(key_buf, &val, sizeof(double));
-        key = Slice(key_buf, sizeof(double));
+      char key_buf[sizeof(uint64_t)];
+      for (int i = 0; i < 8; i++) {
+        key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
       }
-      else {
-        char key_buf[sizeof(uint64_t)];
-        for (int i = 0; i < 8; i++) {
-          key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
-        }
-        key = Slice(key_buf, sizeof(uint64_t));
-      }
+      key = Slice(key_buf, sizeof(uint64_t));
     }
 
     if (get_weight == 0 && put_weight == 0) {
@@ -6015,19 +5972,11 @@ void YCSBWorkloadE(ThreadState* thread) {
                           static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[2])) << 40 |
                           static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[1])) << 48 |
                           static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[0])) << 56);
-      if (FLAGS_dataset_type.compare("floats") == 0) {
-        char key_buf[sizeof(double)];
-        double val = data_doubles[key_int];
-        std::memcpy(key_buf, &val, sizeof(double));
-        key = Slice(key_buf, sizeof(double));
+      char key_buf[sizeof(uint64_t)];
+      for (int i = 0; i < 8; i++) {
+        key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
       }
-      else {
-        char key_buf[sizeof(uint64_t)];
-        for (int i = 0; i < 8; i++) {
-          key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
-        }
-        key = Slice(key_buf, sizeof(uint64_t));
-      }
+      key = Slice(key_buf, sizeof(uint64_t));
     }
 
     if (scan_weight == 0 && insert_weight == 0) {
@@ -6116,19 +6065,11 @@ void YCSBWorkloadE(ThreadState* thread) {
                           static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[2])) << 40 |
                           static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[1])) << 48 |
                           static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[0])) << 56);
-      if (FLAGS_dataset_type.compare("floats") == 0) {
-        char key_buf[sizeof(double)];
-        double val = data_doubles[key_int];
-        std::memcpy(key_buf, &val, sizeof(double));
-        key = Slice(key_buf, sizeof(double));
+      char key_buf[sizeof(uint64_t)];
+      for (int i = 0; i < 8; i++) {
+        key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
       }
-      else {
-        char key_buf[sizeof(uint64_t)];
-        for (int i = 0; i < 8; i++) {
-          key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
-        }
-        key = Slice(key_buf, sizeof(uint64_t));
-      }
+      key = Slice(key_buf, sizeof(uint64_t));
     }
 
     if (read_weight == 0 && rmw_weight == 0) {
@@ -6738,19 +6679,11 @@ void YCSBWorkloadE(ThreadState* thread) {
         static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[2])) << 40 |
         static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[1])) << 48 |
         static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[0])) << 56);
-        if (FLAGS_dataset_type.compare("floats") == 0) {
-          char key_buf[sizeof(double)];
-          double val = data_doubles[key_int];
-          std::memcpy(key_buf, &val, sizeof(double));
-          key = Slice(key_buf, sizeof(double));
-          }
-        else {
-          char key_buf[sizeof(uint64_t)];
-          for (int i = 0; i < 8; i++) {
-            key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
-          }
-          key = Slice(key_buf, sizeof(uint64_t));
+        char key_buf[sizeof(uint64_t)];
+        for (int i = 0; i < 8; i++) {
+          key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
         }
+        key = Slice(key_buf, sizeof(uint64_t));
       }  
       read++;
       std::string ts_ret;
@@ -8027,19 +7960,11 @@ void YCSBWorkloadE(ThreadState* thread) {
         static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[2])) << 40 |
         static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[1])) << 48 |
         static_cast<uint64_t>(static_cast<unsigned char>(key_ptr[0])) << 56);
-        if (FLAGS_dataset_type.compare("floats") == 0) {
-          char key_buf[sizeof(double)];
-          double val = data_doubles[key_int];
-          std::memcpy(key_buf, &val, sizeof(double));
-          key = Slice(key_buf, sizeof(double));
+        char key_buf[sizeof(uint64_t)];
+        for (int i = 0; i < 8; i++) {
+          key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
         }
-        else {
-          char key_buf[sizeof(uint64_t)];
-          for (int i = 0; i < 8; i++) {
-            key_buf[i] = (data[key_int] >> (56 - 8 * i)) & 0xFF;
-          }
-          key = Slice(key_buf, sizeof(uint64_t));
-        }
+        key = Slice(key_buf, sizeof(uint64_t));
       }  
       if (get_weight == 0 && put_weight == 0) {
         // one batch completed, reinitialize for next batch
@@ -9254,39 +9179,20 @@ static void* load_keys() {
       std::cout << FLAGS_dataset << " does not exist" << std::endl;
       exit(0);
     }
-
-    std::cout << "LOADING " << FLAGS_dataset << std::endl;
+    std::cout << "Loading " << FLAGS_dataset << std::endl;
     uint64_t total_keys;
+    is.read(reinterpret_cast<char*>(&total_keys), sizeof(uint64_t));
+    std::cout << "Total keys: " << total_keys << std::endl;
+    data = new uint64_t[total_keys];
+    is.read(reinterpret_cast<char*>(data), total_keys * sizeof(uint64_t));
 
-    if (FLAGS_dataset_type.compare("floats") == 0) {
-      is.seekg(0, std::ios::end);
-      std::streampos file_size = is.tellg();
-      total_keys = static_cast<uint64_t>(file_size / sizeof(double));
-      is.seekg(0, std::ios::beg);
+    std::cout << "Sample keys: ";
+    for (uint64_t i = 0; i < 3 && i < total_keys; i++)
+      std::cout << data[i] << " ";
+    std::cout << "..." << std::endl;
 
-      data_doubles = new double[total_keys];
-      is.read(reinterpret_cast<char*>(data_doubles), total_keys * sizeof(double));
-
-      std::cout << "4 Sample keys: ";
-      for (uint64_t i = 0; i < 4 && i < total_keys; i++)
-        std::cout << data_doubles[i] << " ";
-      std::cout << "..." << std::endl;
-
-      is.close();
-      return static_cast<void*>(data_doubles);
-    } else {
-      is.read(reinterpret_cast<char*>(&total_keys), sizeof(uint64_t));
-      data = new uint64_t[total_keys];
-      is.read(reinterpret_cast<char*>(data), total_keys * sizeof(uint64_t));
-
-      std::cout << "4 Sample keys: ";
-      for (uint64_t i = 0; i < 4 && i < total_keys; i++)
-        std::cout << data[i] << " ";
-      std::cout << "..." << std::endl;
-
-      is.close();
-      return static_cast<void*>(data);
-    }
+    is.close();
+    return static_cast<void*>(data);
   }
   return nullptr;
 }
