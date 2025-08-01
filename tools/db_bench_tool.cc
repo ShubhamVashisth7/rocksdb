@@ -9190,8 +9190,9 @@ static void* load_keys() {
     for (uint64_t i = 0; i < 3 && i < total_keys; i++)
       std::cout << data[i] << " ";
     std::cout << "..." << std::endl;
-
     is.close();
+    std::mt19937 g(FLAGS_seed);
+    std::shuffle(data, data + FLAGS_num, g);
     return static_cast<void*>(data);
   }
   return nullptr;
