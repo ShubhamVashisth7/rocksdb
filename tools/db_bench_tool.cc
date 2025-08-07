@@ -2464,7 +2464,7 @@ class Stats {
     std::string output_path = "out/db_bench.csv";
     ofile.open(output_path, std::ios_base::app);
 
-    double p90_latency, p99_latency;
+    double p90_latency = 0.0, p99_latency = 0.0;
     if (hist_.count(kRead)) {
       p90_latency = hist_[kRead]->Percentile(90.0);
       p99_latency = hist_[kRead]->Percentile(99.0);
@@ -2475,7 +2475,7 @@ class Stats {
       p90_latency = hist_.begin()->second->Percentile(90.0);
       p99_latency = hist_.begin()->second->Percentile(99.0);
     } 
-    ofile << "RocksDB" << "," << FLAGS_dataset << "," << name.ToString().c_str() << "," << FLAGS_memtablerep << "," << FLAGS_num*FLAGS_threads << "," << FLAGS_threads << "," << elapsed << "," << (long)throughput << "," << avg_latency << "," << p90_latency << "," << p99_latency << std::endl;
+    ofile << "RocksDB" << "," << FLAGS_dataset << "," << name.ToString().c_str() << "," << FLAGS_memtablerep << "," << FLAGS_num*FLAGS_threads << "," << FLAGS_threads << "," << elapsed << "," << (long)throughput << "," << avg_latency << "," << p90_latency / 1e6  << "," << p99_latency / 1e6 << std::endl;
     ofile.close();
   }
 };
@@ -9192,7 +9192,7 @@ static void* load_keys() {
     std::cout << "..." << std::endl;
     is.close();
     std::mt19937 g(FLAGS_seed);
-    std::shuffle(data, data + FLAGS_num, g);
+    std::shuffle(data, data + std::min(static_cast<int>(FLAGS_num) * static_cast<int>(FLAGS_threads), static_cast<int>(total_keys)), g);
     return static_cast<void*>(data);
   }
   return nullptr;
