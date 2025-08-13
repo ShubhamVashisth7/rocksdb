@@ -2477,8 +2477,13 @@ class Stats {
       p90_latency = hist_.begin()->second->Percentile(90.0);
       p99_latency = hist_.begin()->second->Percentile(99.0);
     } 
-    ofile << "RocksDB" << "," << FLAGS_dataset << "," << name.ToString().c_str() << "," << FLAGS_memtablerep << "," << FLAGS_num*FLAGS_threads << "," << FLAGS_threads << "," << elapsed << "," << (long)throughput << "," << avg_latency << "," << p90_latency / 1e6  << "," << p99_latency / 1e6 << std::endl;
-    ofile.close();
+    std::string distribution;
+    if (FLAGS_YCSB_uniform_distribution) 
+      distribution = "uniform";
+    else
+      distribution = "zipfian";
+    ofile << "RocksDB" << "," << FLAGS_dataset << "," << name.ToString().c_str() << "," << distribution << "," << FLAGS_memtablerep << "," << FLAGS_num*FLAGS_threads << "," << FLAGS_threads << "," << elapsed << "," << (long)throughput << "," << avg_latency << "," << p90_latency / 1e6 << "," << p99_latency / 1e6 << std::endl;
+        ofile.close();
   }
 };
 
