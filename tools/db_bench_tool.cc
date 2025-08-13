@@ -38,6 +38,7 @@
 #include <queue>
 #include <thread>
 #include <unordered_map>
+#include <bits/stdc++.h>
 
 #include "db/db_impl/db_impl.h"
 #include "db/malloc_stats.h"
@@ -165,6 +166,7 @@ DEFINE_string(
     "ycsbwkldd,"
     "ycsbwklde,"
     "ycsbwkldf,"
+    "multidistribution,"
 
     "Comma-separated list of operations to run in the specified"
     " order. Available benchmarks:\n"
@@ -3724,6 +3726,8 @@ class Benchmark {
         method = &Benchmark::YCSBWorkloadE;
       } else if (name == "ycsbwkldf") {
         method = &Benchmark::YCSBWorkloadF;
+      } else if (name == "multidistribution") {
+        method = &Benchmark::MultiDistribution;
       } else if (name == "block_cache_entry_stats") {
         // DB::Properties::kBlockCacheEntryStats
         PrintStats("rocksdb.block-cache-entry-stats");
@@ -6108,6 +6112,30 @@ void YCSBWorkloadE(ThreadState* thread) {
            reads_done, writes_done, readwrites_, found);
   thread->stats.AddMessage(msg);
 }
+
+  void MultiDistribution(ThreadState* thread) {
+    RandomGenerator gen;
+    DB* db = SelectDB(thread);
+    int64_t writes_done = 0;
+
+    for (uint64_t i = 0; i < static_cast<uint64_t>(FLAGS_num); i++) {
+      char key_buf[sizeof(uint64_t)];
+      for (int j = 0; j < 8; j++) 
+        key_buf[j] = (data[j] >> (56 - 8 * j)) & 0xFF;
+      Slice key = Slice(key_buf, sizeof(uint64_t));
+      // std::cout << i << " - " << data[j] << std::endl;
+      Status s = db->Put(write_options_, key, gen.Generate(value_size));
+      if (s.ok()) {
+        writes_done++;
+        thread->stats.FinishedOps(nullptr, db, 1, kWrite);
+      } 
+    }
+
+    // Summary
+    char msg[100];
+    snprintf(msg, sizeof(msg), "( writes:%" PRIu64 " )", writes_done);
+    thread->stats.AddMessage(msg);
+  }
 
   Status DoDeterministicCompact(ThreadState* thread,
                                 CompactionStyle compaction_style,
@@ -9185,14 +9213,16 @@ static void* load_keys() {
     std::cout << "Total keys: " << total_keys << std::endl;
     data = new uint64_t[total_keys];
     is.read(reinterpret_cast<char*>(data), total_keys * sizeof(uint64_t));
-
     std::cout << "Sample keys: ";
     for (uint64_t i = 0; i < 3 && i < total_keys; i++)
       std::cout << data[i] << " ";
     std::cout << "..." << std::endl;
     is.close();
-    std::mt19937 g(FLAGS_seed);
-    std::shuffle(data, data + std::min(static_cast<int>(FLAGS_num) * static_cast<int>(FLAGS_threads), static_cast<int>(total_keys)), g);
+    if (static_cast<std::string>(FLAGS_benchmarks).find("multidistribution")==std::string::npos) {
+      std::mt19937 g(FLAGS_seed);
+      std::cout << "Shuffling keys" << std::endl;
+      std::shuffle(data, data + std::min(static_cast<int>(FLAGS_num) * static_cast<int>(FLAGS_threads), static_cast<int>(total_keys)), g);
+    }
     return static_cast<void*>(data);
   }
   return nullptr;
