@@ -2482,7 +2482,7 @@ class Stats {
       distribution = "zipfian";
     else
       distribution = "uniform";
-    ofile << "RocksDB" << "," << FLAGS_dataset << "," << name.ToString().c_str() << "," << distribution << "," << FLAGS_memtablerep << "," << FLAGS_num*FLAGS_threads << "," << FLAGS_threads << "," << elapsed << "," << (long)throughput << "," << avg_latency << "," << p90_latency / 1e6 << "," << p99_latency / 1e6 << std::endl;
+    ofile << "RocksDB" << "," << FLAGS_dataset << "," << name.ToString().c_str() << "," << distribution << "," << FLAGS_key_size << "," << FLAGS_value_size << "," << FLAGS_memtablerep << "," << FLAGS_num*FLAGS_threads << "," << FLAGS_threads << "," << elapsed << "," << (long)throughput << "," << avg_latency << "," << p90_latency / 1e6 << "," << p99_latency / 1e6 << std::endl;
         ofile.close();
   }
 };
